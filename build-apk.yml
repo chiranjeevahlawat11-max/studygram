@@ -1,0 +1,74 @@
+name: Build StudyFeed debug APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # only used to publish the APK as a GitHub Release (optional step below)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Works if the project files are in the repo, OR if you only uploaded the .zip.
+      - name: Locate project (unzips it if needed)
+        id: locate
+        run: |
+          set -e
+          if [ -f gradlew ]; then
+            DIR="$PWD"
+          elif [ -f StudyFeed/gradlew ]; then
+            DIR="$PWD/StudyFeed"
+          else
+            ZIP=$(ls -1 *.zip 2>/dev/null | head -n 1 || true)
+            if [ -z "$ZIP" ]; then echo "No project found. Upload StudyFeed_Milestone3.zip to the repository root."; exit 1; fi
+            mkdir -p _project
+            unzip -q "$ZIP" -d _project
+            GR=$(find _project -maxdepth 3 -name gradlew | head -n 1)
+            if [ -z "$GR" ]; then echo "gradlew not found inside $ZIP"; exit 1; fi
+            DIR="$PWD/$(dirname "$GR")"
+          fi
+          chmod +x "$DIR/gradlew"
+          echo "Project directory: $DIR"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Upload APK (download it from the run page, "Artifacts")
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudyFeed-debug-apk
+          path: ${{ steps.locate.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # Optional convenience: also attach the APK to a Release so you can download it directly.
+      - name: Publish APK as a GitHub Release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.locate.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          gh release create "build-${{ github.run_number }}" "$APK" \
+            --prerelease --title "StudyFeed debug build ${{ github.run_number }}" \
+            --notes "Debug APK built by GitHub Actions."
+
+      # Runs after the APK is uploaded, so a failing test never hides the APK.
+      - name: Run unit tests
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: ./gradlew --no-daemon testDebugUnitTest

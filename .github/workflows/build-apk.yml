@@ -72,3 +72,4 @@ jobs:
       - name: Run unit tests
         working-directory: ${{ steps.locate.outputs.dir }}
         run: ./gradlew --no-daemon testDebugUnitTest
+
